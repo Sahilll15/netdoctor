@@ -78,8 +78,11 @@ pipx install netdoctor
 **Homebrew** (macOS / Linux):
 
 ```bash
-brew install Sahilll15/tap/netdoctor
+brew tap Sahilll15/tap     # one-time
+brew install netdoctor
 ```
+
+(or in one line: `brew install Sahilll15/tap/netdoctor`)
 
 **Docker** (no local Python at all):
 
