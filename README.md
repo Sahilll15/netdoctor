@@ -2,6 +2,10 @@
 
 > Point it at a host. It walks the network debugging ladder rung by rung and tells you **exactly which one broke** — and what to do about it.
 
+<p align="center">
+  <img src="assets/hero.gif" alt="netdoctor walking the full network ladder against github.com: an animated ECG header, the signal-path rail filling in rung by rung, a plain-English diagnosis, a quality scorecard, and a hop-by-hop traceroute" width="760">
+</p>
+
 `netdoctor` automates the sequence every engineer runs by hand when "the service is down": resolve the name, ping it, check the port, hit the app. Instead of five commands and five mental models, you get one live report, a plain-English diagnosis, and a **quality scorecard** that grades the host on reachability, performance, and latency.
 
 ```
@@ -132,6 +136,10 @@ Every single-host run includes a **traceroute** that shows the path hop by hop, 
 
 `--mtr` turns that into a live, **mtr-style** monitor that re-probes on an interval and tracks rolling **loss %**, last/avg/best/worst latency, and a sparkline **per hop**:
 
+<p align="center">
+  <img src="assets/mtr.gif" alt="netdoctor --mtr live path monitor: per-hop loss %, last/avg/best/worst latency, sparklines, and the point where the route to github.com goes dark" width="820">
+</p>
+
 ```text
 ╭─────┬─────────────────┬──────┬──────┬─────┬──────┬───────┬────────────╮
 │ HOP │ HOST            │ LOSS │ LAST │ AVG │ BEST │ WORST │ TREND      │
@@ -150,6 +158,10 @@ netdoctor github.com api.internal:8080 --watch --interval 10
 ```
 
 Turns netdoctor into a persistent dashboard that re-checks on an interval and keeps a **latency-trend sparkline** and a rolling **uptime %** per host:
+
+<p align="center">
+  <img src="assets/watch.gif" alt="netdoctor --watch live dashboard monitoring github.com and 1.1.1.1: per-host DNS/port/HTTP, latency-trend sparkline, grade, uptime %, and status" width="880">
+</p>
 
 ```text
 ╭────┬──────────────────┬────────┬─────────┬──────────┬───────────────┬──────┬───┬──────────╮
@@ -170,6 +182,10 @@ and an estimated request rate — bump `--samples` higher for a fuller picture:
 ```bash
 netdoctor api.example.com --samples 30
 ```
+
+<p align="center">
+  <img src="assets/scorecard.gif" alt="netdoctor scorecard from a 12-probe benchmark of github.com: letter grade, reachability/performance/stability gauges, latency min/avg/p95/max, jitter, throughput, and a per-sample distribution sparkline" width="620">
+</p>
 
 ```text
 ╭─ scorecard ────────────────────────────────────────────────────────────────╮
@@ -306,6 +322,19 @@ and closes itself. CI runs them on Python 3.9 / 3.11 / 3.13 via GitHub Actions.
 - [x] Hop-by-hop traceroute with break detection + an `mtr`-style live monitor (`--mtr`)
 - [ ] Read targets from a file / stdin
 - [ ] Ship as a single-file binary (PyInstaller) and a container image
+
+---
+
+## Demos
+
+The animated demos in this README are real `netdoctor` runs, recorded with
+[vhs](https://github.com/charmbracelet/vhs). The scripts live in
+[`assets/`](assets/) as `*.tape` files, so any demo is reproducible:
+
+```bash
+brew install vhs
+vhs assets/hero.tape        # → assets/hero.gif
+```
 
 ---
 
