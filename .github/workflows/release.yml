@@ -47,7 +47,7 @@ jobs:
           python-version: "3.12"
       - run: pip install pyinstaller .
       - name: Build binary
-        run: pyinstaller --onefile --name netdoctor --collect-submodules rich packaging/entry.py
+        run: pyinstaller --onefile --name netdoctor --collect-submodules rich --collect-data certifi packaging/entry.py
       - name: Stage asset
         shell: bash
         run: |

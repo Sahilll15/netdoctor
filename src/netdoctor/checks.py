@@ -145,6 +145,24 @@ def check_port(host: str, port: int, timeout: float) -> Rung:
 # ---------------------------------------------------------------------------
 # Rung 4 — HTTP/TLS: does the application actually respond?
 # ---------------------------------------------------------------------------
+def _ssl_context() -> ssl.SSLContext:
+    """A verifying TLS context that also trusts certifi's up-to-date CA bundle.
+
+    Python's ssl uses OpenSSL's default store, which is often stale (and basically
+    empty on a frozen PyInstaller binary) — so newer roots like Let's Encrypt's
+    ISRG chain fail with "unable to get local issuer certificate" even though every
+    browser trusts them. Loading certifi on top fixes those false negatives without
+    weakening verification.
+    """
+    ctx = ssl.create_default_context()
+    try:
+        import certifi
+        ctx.load_verify_locations(cafile=certifi.where())
+    except Exception:
+        pass  # fall back to the system default store
+    return ctx
+
+
 def _cert_days_left(cert: "dict | None") -> "tuple[str, int | None]":
     if not cert or "notAfter" not in cert:
         return "", None
@@ -164,7 +182,7 @@ def check_http(host: str, port: int, scheme: str, path: str, timeout: float) -> 
     tls_bits = ""
     try:
         if scheme == "https":
-            ctx = ssl.create_default_context()
+            ctx = _ssl_context()
             conn = http.client.HTTPSConnection(host, port, timeout=timeout, context=ctx)
         else:
             conn = http.client.HTTPConnection(host, port, timeout=timeout)

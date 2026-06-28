@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "netdoctor"
-version = "0.1.0"
+version = "0.1.1"
 description = "A network health-check CLI that walks the DevOps debugging ladder and tells you which rung broke."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -21,7 +21,7 @@ classifiers = [
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
 ]
-dependencies = ["rich>=13.0"]
+dependencies = ["rich>=13.0", "certifi>=2024.0"]
 
 [project.urls]
 Homepage = "https://github.com/Sahilll15/netdoctor"
