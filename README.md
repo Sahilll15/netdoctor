@@ -1,5 +1,10 @@
 # netdoctor
 
+[![PyPI](https://img.shields.io/pypi/v/netdoctor)](https://pypi.org/project/netdoctor/)
+[![CI](https://github.com/Sahilll15/netdoctor/actions/workflows/ci.yml/badge.svg)](https://github.com/Sahilll15/netdoctor/actions/workflows/ci.yml)
+[![Python](https://img.shields.io/pypi/pyversions/netdoctor)](https://pypi.org/project/netdoctor/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 > Point it at a host. It walks the network debugging ladder rung by rung and tells you **exactly which one broke** — and what to do about it.
 
 <p align="center">
