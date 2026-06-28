@@ -251,6 +251,23 @@ def check_http(host: str, port: int, scheme: str, path: str, timeout: float) -> 
 # ---------------------------------------------------------------------------
 # Optional rung — traceroute: what path do packets take? (advisory)
 # ---------------------------------------------------------------------------
+def _dest_ip(*streams: str) -> "str | None":
+    """Pull the target IP from traceroute's banner, wherever the OS prints it.
+
+    macOS sends the "traceroute to host (ip)" banner to stderr, Linux to stdout,
+    and Windows tracert prints "Tracing route to host [ip]". We scan every stream
+    for that banner instead of assuming it leads stdout — otherwise the first
+    hop's IP gets mistaken for the destination (and a dark route reads as reached).
+    """
+    for stream in streams:
+        for line in stream.splitlines():
+            low = line.lstrip().lower()
+            if low.startswith("traceroute to") or low.startswith("tracing route"):
+                m = re.search(r"[\(\[]([0-9a-fA-F:.]+)[\)\]]", line)
+                return m.group(1) if m else None
+    return None
+
+
 def _parse_hops(output: str) -> "list[dict]":
     hops = []
     for line in output.splitlines():
@@ -324,9 +341,7 @@ def check_trace(host: str, timeout: float, max_hops: int = 12) -> Rung:
     hops = _parse_hops(proc.stdout)
     rung.latency_ms = _elapsed_ms(start)
 
-    first_line = proc.stdout.split("\n", 1)[0]
-    dest_m = re.search(r"[\(\[]([0-9a-fA-F:.]+)[\)\]]", first_line)
-    dest_ip = dest_m.group(1) if dest_m else None
+    dest_ip = _dest_ip(proc.stderr or "", proc.stdout or "")
     if dest_ip:
         reached = any(h["responded"] and h["ip"] == dest_ip for h in hops)
     else:

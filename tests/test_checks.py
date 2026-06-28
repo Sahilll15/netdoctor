@@ -2,7 +2,13 @@
 against a socket we open and close ourselves — no external network needed."""
 import socket
 
-from netdoctor.checks import _cert_days_left, _parse_hops, check_dns, check_port
+from netdoctor.checks import (
+    _cert_days_left,
+    _dest_ip,
+    _parse_hops,
+    check_dns,
+    check_port,
+)
 from netdoctor.model import Status
 
 
@@ -76,3 +82,20 @@ def test_parse_hops_survives_malformed_rtt():
     assert hops[0]["responded"] is True
     assert hops[0]["rtt_ms"] is None  # malformed timing → no number, not a crash
     assert hops[1]["rtt_ms"] == 10.4
+
+
+def test_dest_ip_reads_banner_from_either_stream():
+    banner = "traceroute to github.com (20.207.73.82), 12 hops max, 40 byte packets"
+    hops_only = " 1  192.168.1.1 (192.168.1.1)  3.0 ms\n 2  * * *\n"
+
+    # Linux: banner on stdout. macOS: banner on stderr, stdout starts at hop 1 —
+    # the destination must NOT be misread as the first hop's IP.
+    assert _dest_ip(banner + "\n" + hops_only, "") == "20.207.73.82"
+    assert _dest_ip(hops_only, banner) == "20.207.73.82"
+
+    # Windows tracert uses brackets and a different verb.
+    win = "Tracing route to github.com [20.207.73.82]\nover a maximum of 30 hops:\n"
+    assert _dest_ip(win, "") == "20.207.73.82"
+
+    # No banner anywhere → no false destination.
+    assert _dest_ip(hops_only, "") is None
