@@ -40,7 +40,7 @@ def test_cert_days_left_handles_missing_cert():
     assert _cert_days_left({}) == ("", None)
 
 
-def test_parse_hops_marks_silent_hops():
+def test_parse_hops_extracts_host_ip_rtt_and_silence():
     output = (
         "traceroute to example.com (93.184.216.34), 30 hops max\n"
         " 1  router.local (192.168.1.1)  1.2 ms\n"
@@ -49,5 +49,15 @@ def test_parse_hops_marks_silent_hops():
     )
     hops = _parse_hops(output)
     assert [h["hop"] for h in hops] == [1, 2, 3]
+
+    assert hops[0]["responded"] is True
+    assert hops[0]["host"] == "router.local"
+    assert hops[0]["ip"] == "192.168.1.1"
+    assert hops[0]["rtt_ms"] == 1.2
+
     assert hops[1]["responded"] is False
+    assert hops[1]["host"] == "*"
+    assert hops[1]["rtt_ms"] is None
+
     assert hops[2]["responded"] is True
+    assert hops[2]["rtt_ms"] == 10.4

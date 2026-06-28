@@ -77,16 +77,46 @@ Now `netdoctor` is on your PATH. (Prefer not to use the console script? `python 
 ## Usage
 
 ```bash
-netdoctor github.com                       # full https check on port 443
+netdoctor github.com                       # full picture: ladder + traceroute + scorecard
+netdoctor github.com --quick               # fast: skip traceroute & extra probes
 netdoctor db.internal:5432                 # is the Postgres port reachable?
-netdoctor https://api.example.com/health   # check one specific endpoint
 netdoctor github.com 1.1.1.1 db:5432       # a whole fleet at once (concurrent)
 netdoctor github.com --watch               # live vitals dashboard (ctrl-c to stop)
-netdoctor example.com --trace              # include the network path
-netdoctor example.com --json               # machine-readable output for CI / cron
+netdoctor github.com --mtr                 # live mtr-style path monitor
+netdoctor github.com --json                # machine-readable output for CI / cron
 ```
 
 The target accepts a **bare host**, **host:port**, or a **full URL** — the scheme, port, and path are parsed out automatically. Explicit flags (`--port`, `--scheme`, `--path`) always win. Pass **several targets** to check them concurrently as a fleet.
+
+> **Full by default.** A single-host run does the whole picture — the ladder, a traceroute, and a latency scorecard — with no flags to remember. Use `--quick` (or `--no-trace`) when you just want a fast up/down answer.
+
+### Traceroute (default) & `--mtr`
+
+Every single-host run includes a **traceroute** that shows the path hop by hop, with per-hop latency, reverse-DNS names, and a marker for **exactly where the path goes dark**:
+
+```text
+╭─ route → 140.82.112.3 ───────────────────────────────────────────────╮
+│ ●   1  router.local        192.168.1.1       1 ms                    │
+│ ●   2  isp-gateway.net      10.20.0.1         6 ms                    │
+│ ○   3  * * *                                  —                       │
+│ ●   4  140.82.112.3         140.82.112.3     11 ms   ◀ destination    │
+│                                                                       │
+│ ✓ destination reached                                                 │
+╰───────────────────────────────────────────────────────────────────────╯
+```
+
+`--mtr` turns that into a live, **mtr-style** monitor that re-probes on an interval and tracks rolling **loss %**, last/avg/best/worst latency, and a sparkline **per hop**:
+
+```text
+╭─────┬─────────────────┬──────┬──────┬─────┬──────┬───────┬────────────╮
+│ HOP │ HOST            │ LOSS │ LAST │ AVG │ BEST │ WORST │ TREND      │
+├─────┼─────────────────┼──────┼──────┼─────┼──────┼───────┼────────────┤
+│   1 │ router.local    │   0% │    1 │   1 │    1 │     2 │ ▁▂▁▁▂▁     │
+│   2 │ isp-gateway.net │   0% │    6 │   7 │    5 │    12 │ ▂▃▂▅▂▃     │
+│   3 │ * * *           │ 100% │    — │   — │    — │     — │ ××××××     │
+╰─────┴─────────────────┴──────┴──────┴─────┴──────┴───────┴────────────╯
+⟳ next probe in 3s   ·   run #6   ·   ctrl-c to stop
+```
 
 ### Live monitor (`--watch`)
 
@@ -108,9 +138,9 @@ Turns netdoctor into a persistent dashboard that re-checks on an interval and ke
 
 ### Scorecard — *how good, how fast, how reliable*
 
-Every run ends in a **scorecard** that grades the host **A+ → F**. Add `--samples N`
-to probe the app repeatedly and get a real latency distribution, jitter, and an
-estimated request rate:
+Every run ends in a **scorecard** that grades the host **A+ → F**. It probes the
+app a few times by default (`--samples 5`) for a real latency distribution, jitter,
+and an estimated request rate — bump `--samples` higher for a fuller picture:
 
 ```bash
 netdoctor api.example.com --samples 30
@@ -151,11 +181,13 @@ In fleet and `--watch` views, the grade shows as a compact **GRADE** column per 
 | `--scheme {http,https}` | Force the scheme for the app check |
 | `--path` | HTTP path to request (default: `/`) |
 | `-t, --timeout SECONDS` | Per-check timeout (default: 4.0) |
-| `-w, --watch` | Live dashboard, re-checking on an interval |
-| `-n, --interval SECONDS` | `--watch` refresh interval (default: 5.0) |
-| `--max-runs N` | With `--watch`, stop after N refreshes (0 = until ctrl-c) |
-| `-s, --samples N` | Probe the app N times to score latency / jitter / throughput |
-| `--trace` | Also run traceroute (slower; shows the route) |
+| `-w, --watch` | Live vitals dashboard, re-checking on an interval |
+| `--mtr` | Live mtr-style path monitor (single host) |
+| `-n, --interval SECONDS` | `--watch` / `--mtr` refresh interval (default: 5.0) |
+| `--max-runs N` | With `--watch` / `--mtr`, stop after N refreshes (0 = until ctrl-c) |
+| `-s, --samples N` | App probes for the latency scorecard (default: 5) |
+| `--no-trace` | Skip the traceroute step (faster) |
+| `--quick` | Fastest run: skip traceroute and extra probes |
 | `--json` | Emit JSON instead of the live report |
 | `--no-color` | Disable colour / styling |
 
@@ -246,8 +278,8 @@ and closes itself. CI runs them on Python 3.9 / 3.11 / 3.13 via GitHub Actions.
 - [x] Multiple targets in one run (concurrent fleet view)
 - [x] HTTP timing breakdown (connect / TTFB)
 - [x] Quality scorecard — reachability / performance / latency / grade (`--samples`)
+- [x] Hop-by-hop traceroute with break detection + an `mtr`-style live monitor (`--mtr`)
 - [ ] Read targets from a file / stdin
-- [ ] `mtr`-style continuous traceroute
 - [ ] Ship as a single-file binary (PyInstaller) and a container image
 
 ---

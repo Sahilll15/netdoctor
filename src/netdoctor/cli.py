@@ -23,17 +23,21 @@ from .model import Rung, Status, diagnose, worse
 
 DEFAULT_TIMEOUT = 4.0
 DEFAULT_INTERVAL = 5.0
+DEFAULT_SAMPLES = 5
 EXIT_CODE = {"healthy": 0, "degraded": 1, "unhealthy": 2}
 EX_USAGE = 64
 
 EPILOG = """\
+By default a single-host run does the full picture: the ladder + traceroute +
+a latency scorecard. Use --quick (or --no-trace) when you just want it fast.
+
 examples:
-  netdoctor github.com                       full https health check on port 443
+  netdoctor github.com                       full check + traceroute + scorecard
+  netdoctor github.com --quick               fast: skip traceroute & extra probes
   netdoctor db.internal:5432                 is the Postgres port reachable?
-  netdoctor https://api.example.com/health   check one specific endpoint
   netdoctor github.com 1.1.1.1 db:5432       check a fleet of hosts at once
   netdoctor github.com --watch               live vitals dashboard (ctrl-c to stop)
-  netdoctor github.com --trace               include the network path (traceroute)
+  netdoctor github.com --mtr                 live mtr-style path monitor
   netdoctor github.com --json                machine-readable output for CI / cron
 
 exit codes:
@@ -254,17 +258,18 @@ def _run_fleet_pass(targets, timeout, do_trace, state):
     return worst
 
 
-def run_fleet(targets, timeout: float, do_trace: bool, console) -> int:
+def run_fleet(targets, timeout: float, console) -> int:
     from . import render
 
     state, order = _empty_state(targets)
-    worst = _run_fleet_pass(targets, timeout, do_trace, state)
+    # Traceroute is a single-host deep-dive; the fleet table doesn't show it.
+    worst = _run_fleet_pass(targets, timeout, False, state)
     when, _ = _now()
     console.print(render.make_monitor(state, order, when, 1, 0, 0, watching=False, settled=True))
     return EXIT_CODE[worst]
 
 
-def run_watch(targets, timeout: float, do_trace: bool, interval: float, max_runs: int, console) -> int:
+def run_watch(targets, timeout: float, interval: float, max_runs: int, console) -> int:
     from rich.live import Live
 
     from . import render
@@ -276,7 +281,7 @@ def run_watch(targets, timeout: float, do_trace: bool, interval: float, max_runs
         with Live(console=console, refresh_per_second=12) as live:
             while True:
                 run_no += 1
-                worst = worse(worst, _run_fleet_pass(targets, timeout, do_trace, state))
+                worst = worse(worst, _run_fleet_pass(targets, timeout, False, state))
                 when, _ = _now()
                 final = bool(max_runs) and run_no >= max_runs
                 deadline = time.monotonic() + (0 if final else interval)
@@ -295,6 +300,55 @@ def run_watch(targets, timeout: float, do_trace: bool, interval: float, max_runs
     except KeyboardInterrupt:
         pass
     return EXIT_CODE[worst]
+
+
+def run_mtr(t: Target, timeout: float, interval: float, max_runs: int, console) -> int:
+    """mtr-style live path monitor: traceroute every cycle, rolling per-hop stats."""
+    from rich.live import Live
+
+    from . import render
+
+    hopstate: dict = {}
+    order: list = []
+    run_no = 0
+    try:
+        with Live(console=console, refresh_per_second=12) as live:
+            while True:
+                run_no += 1
+                rung = checks.check_trace(t.host, timeout)
+                for h in rung.data.get("hops", []):
+                    n = h["hop"]
+                    st = hopstate.get(n)
+                    if st is None:
+                        st = {"host": h["host"], "ip": h.get("ip"),
+                              "rtts": deque(maxlen=60), "resp": 0, "total": 0}
+                        hopstate[n] = st
+                        order.append(n)
+                    if h["host"] and h["host"] != "*":
+                        st["host"] = h["host"]
+                        st["ip"] = h.get("ip") or st["ip"]
+                    st["total"] += 1
+                    if h["responded"] and h["rtt_ms"] is not None:
+                        st["resp"] += 1
+                        st["rtts"].append(h["rtt_ms"])
+                    else:
+                        st["rtts"].append(None)
+                order.sort()
+                when, _ = _now()
+                final = bool(max_runs) and run_no >= max_runs
+                deadline = time.monotonic() + (0 if final else interval)
+                while True:
+                    remaining = deadline - time.monotonic()
+                    live.update(render.make_mtr(hopstate, order, t.label(), when,
+                                                run_no, remaining, interval, settled=final))
+                    if remaining <= 0:
+                        break
+                    time.sleep(0.12)
+                if final:
+                    break
+    except KeyboardInterrupt:
+        pass
+    return 0
 
 
 def run_json(targets, timeout: float, do_trace: bool, samples: int) -> int:
@@ -333,14 +387,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--path", help="HTTP path to request (default: /)")
     p.add_argument("-t", "--timeout", type=float, default=DEFAULT_TIMEOUT, metavar="SECONDS",
                    help=f"per-check timeout in seconds (default: {DEFAULT_TIMEOUT})")
-    p.add_argument("-w", "--watch", action="store_true", help="live dashboard, re-checking on an interval")
+    p.add_argument("-w", "--watch", action="store_true", help="live vitals dashboard, re-checking on an interval")
+    p.add_argument("--mtr", action="store_true", help="live mtr-style path monitor (single host)")
     p.add_argument("-n", "--interval", type=float, default=DEFAULT_INTERVAL, metavar="SECONDS",
-                   help=f"--watch refresh interval (default: {DEFAULT_INTERVAL})")
+                   help=f"--watch / --mtr refresh interval (default: {DEFAULT_INTERVAL})")
     p.add_argument("--max-runs", type=int, default=0, metavar="N",
-                   help="with --watch, stop after N refreshes (0 = run until ctrl-c)")
-    p.add_argument("-s", "--samples", type=int, default=1, metavar="N",
-                   help="probe the app N times to score latency / jitter / throughput (default: 1)")
-    p.add_argument("--trace", action="store_true", help="also run traceroute (slower; shows the path)")
+                   help="with --watch / --mtr, stop after N refreshes (0 = until ctrl-c)")
+    p.add_argument("-s", "--samples", type=int, default=DEFAULT_SAMPLES, metavar="N",
+                   help=f"app probes for the latency/throughput scorecard (default: {DEFAULT_SAMPLES})")
+    p.add_argument("--no-trace", action="store_false", dest="trace", help="skip the traceroute step (faster)")
+    p.add_argument("--quick", action="store_true", help="fastest run: skip traceroute and extra probes")
     p.add_argument("--json", action="store_true", help="emit JSON instead of the live report")
     p.add_argument("--no-color", action="store_true", help="disable colour / styling")
     p.add_argument("-V", "--version", action="version", version=f"netdoctor {__version__}")
@@ -367,18 +423,27 @@ def main(argv=None) -> int:
         print("error: could not parse a host from one of the targets", file=sys.stderr)
         return EX_USAGE
 
+    # --quick is the fast escape hatch from the full-by-default behaviour.
+    do_trace = args.trace and not args.quick
+    samples = 1 if args.quick else args.samples
+
     try:
         if args.json:
-            return run_json(targets, args.timeout, args.trace, args.samples)
+            return run_json(targets, args.timeout, do_trace, samples)
 
         console = _console(args.no_color)
         if console is None:
             return EX_USAGE
+        if args.mtr:
+            if len(targets) != 1:
+                print("error: --mtr works with a single target", file=sys.stderr)
+                return EX_USAGE
+            return run_mtr(targets[0], args.timeout, args.interval, args.max_runs, console)
         if args.watch:
-            return run_watch(targets, args.timeout, args.trace, args.interval, args.max_runs, console)
+            return run_watch(targets, args.timeout, args.interval, args.max_runs, console)
         if len(targets) == 1:
-            return run_single(targets[0], args.timeout, args.trace, args.samples, console)
-        return run_fleet(targets, args.timeout, args.trace, console)
+            return run_single(targets[0], args.timeout, do_trace, samples, console)
+        return run_fleet(targets, args.timeout, console)
     except KeyboardInterrupt:
         print("\naborted", file=sys.stderr)
         return 130

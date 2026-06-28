@@ -213,18 +213,122 @@ def make_diagnosis(diag: Diagnosis, rungs, elapsed_ms: float) -> Panel:
                  border_style=border, box=ROUNDED, padding=(1, 1))
 
 
+def _hop_color(rtt) -> str:
+    if rtt is None:
+        return "dim"
+    return "green" if rtt < 30 else "cyan" if rtt < 80 else "yellow" if rtt < 150 else "red"
+
+
 def make_route(rung: "Rung | None") -> "Panel | None":
-    hops = rung.data.get("hops") if rung else None
+    from rich.console import Group
+
+    data = rung.data if rung else {}
+    hops = data.get("hops")
     if not hops:
         return None
-    table = Table.grid(padding=(0, 2))
-    table.add_column(justify="right", style="cyan", width=3)
-    table.add_column(ratio=1, overflow="fold")
-    for hop in hops:
-        raw = hop["raw"] or "*"
-        table.add_row(str(hop["hop"]), Text(raw, style="white" if hop["responded"] else "dim"))
-    return Panel(table, title="[dim]route[/]", title_align="left",
-                 border_style="grey37", box=ROUNDED, padding=(0, 1))
+    dest_ip = data.get("dest_ip")
+    reached = data.get("reached")
+    last_resp = max((h["hop"] for h in hops if h["responded"]), default=0)
+
+    table = Table.grid(padding=(0, 1))
+    table.add_column(width=1)                        # node
+    table.add_column(width=3, justify="right")       # hop #
+    table.add_column(min_width=20, overflow="fold")  # host
+    table.add_column(width=16, no_wrap=True)         # ip
+    table.add_column(width=8, justify="right")       # rtt
+    table.add_column(ratio=1)                        # marker
+
+    for h in hops:
+        if h["responded"]:
+            color = _hop_color(h["rtt_ms"])
+            node = Text("●", style=color)
+            host = Text(h["host"], style="white")
+            ip = Text(h["ip"] or "", style="dim")
+            rtt = Text(f"{h['rtt_ms']:.0f} ms" if h["rtt_ms"] is not None else "", style=color)
+        else:
+            node = Text("○", style="grey30")
+            host = Text("* * *", style="grey30")
+            ip = Text("", style="dim")
+            rtt = Text("—", style="dim")
+        marker = Text("◀ destination", style="bold green") if (dest_ip and h["ip"] == dest_ip) else Text("")
+        table.add_row(node, Text(str(h["hop"]), style="grey50"), host, ip, rtt, marker)
+
+    note = Text()
+    if reached:
+        note.append("✓ ", style="green")
+        note.append("destination reached", style="dim")
+    else:
+        note.append("✗ ", style="yellow")
+        note.append(f"path goes dark after hop {last_resp} — destination not reached", style="dim")
+
+    title = f"[dim]route → {dest_ip}[/]" if dest_ip else "[dim]route[/]"
+    return Panel(Group(table, Text(""), note), title=title, title_align="left",
+                 border_style="grey37", box=ROUNDED, padding=(1, 1))
+
+
+def _plain_header(title: str, when: str, *, pulse_style: str, settled: bool) -> Panel:
+    grid = Table.grid(expand=True)
+    grid.add_column(justify="left")
+    grid.add_column(justify="right")
+    wm = Text()
+    wm.append("◉ ", style="bold cyan")
+    wm.append("net", style="bold white")
+    wm.append("doctor", style="bold cyan")
+    wm.append(f"   {title}", style="dim italic")
+    grid.add_row(wm, Text(when, style="dim", justify="right"))
+    grid.add_row(Heartbeat(width=42, style=pulse_style, settled=settled), Text(""))
+    return Panel(grid, border_style="cyan", box=ROUNDED, padding=(0, 1))
+
+
+def make_mtr(hopstate, order, host_label, when, run_no, remaining, interval, *, settled=False):
+    """mtr-style live view: rolling per-hop loss% and latency across probe cycles."""
+    from rich.console import Group
+
+    pulse = "bold green" if settled else "bold red1"
+    header = _plain_header(f"mtr · {host_label}", when, pulse_style=pulse, settled=settled)
+
+    table = Table(box=ROUNDED, border_style="grey37", expand=True, padding=(0, 1), header_style="bold dim")
+    table.add_column("HOP", justify="right", width=3)
+    table.add_column("HOST", no_wrap=True)
+    table.add_column("LOSS", justify="right")
+    table.add_column("LAST", justify="right")
+    table.add_column("AVG", justify="right")
+    table.add_column("BEST", justify="right")
+    table.add_column("WORST", justify="right")
+    table.add_column("TREND", justify="left")
+
+    def cell(value):
+        return Text(f"{value:.0f}" if value is not None else "—", style=_hop_color(value))
+
+    for hop in order:
+        st = hopstate[hop]
+        rtts = [r for r in st["rtts"] if r is not None]
+        loss = 100.0 * (st["total"] - st["resp"]) / st["total"] if st["total"] else 0.0
+        last = next((r for r in reversed(st["rtts"]) if r is not None), None)
+        avg = sum(rtts) / len(rtts) if rtts else None
+        best = min(rtts) if rtts else None
+        worst = max(rtts) if rtts else None
+        loss_style = "green" if loss == 0 else "yellow" if loss < 50 else "red"
+        responded_ever = bool(rtts)
+        host_label_cell = st["host"] if st["host"] and st["host"] != "*" else "* * *"
+        table.add_row(
+            Text(str(hop), style="grey50"),
+            Text(host_label_cell, style="white" if responded_ever else "grey30"),
+            Text(f"{loss:.0f}%", style=loss_style),
+            cell(last), cell(avg), cell(best), cell(worst),
+            sparkline(list(st["rtts"]), width=26),
+        )
+
+    if settled:
+        foot = Text(f"■ stopped after {run_no} run(s)", style="dim")
+    else:
+        foot = Text()
+        foot.append("⟳ ", style="cyan")
+        foot.append(f"next probe in {max(0, remaining):.0f}s", style="dim")
+        foot.append(f"   ·   run #{run_no}   ·   ", style="dim")
+        foot.append("ctrl-c", style="bold dim")
+        foot.append(" to stop", style="dim")
+    return Group(header, table, foot)
 
 
 def verdict_pulse(verdict: Verdict) -> str:

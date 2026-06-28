@@ -258,10 +258,24 @@ def _parse_hops(output: str) -> "list[dict]":
         if not match:
             continue
         rest = match.group(2).strip()
+        responded = rest.replace("*", "").strip() != ""
+        host = ip = rtt = None
+        if responded:
+            ip_m = re.search(r"\(([0-9a-fA-F:.]+)\)", rest)
+            if ip_m:
+                ip = ip_m.group(1)
+            first = rest.split()[0]
+            host = ip if first == "*" else first
+            rtt_m = re.search(r"([\d.]+)\s*ms", rest)
+            if rtt_m:
+                rtt = float(rtt_m.group(1))
         hops.append({
             "hop": int(match.group(1)),
+            "host": host or "*",
+            "ip": ip,
+            "rtt_ms": rtt,
+            "responded": responded,
             "raw": rest,
-            "responded": rest.replace("*", "").strip() != "",
         })
     return hops
 
@@ -278,18 +292,18 @@ def measure(host: str, port: int, scheme: str, path: str, method: str, timeout: 
     return rung.status is Status.OK, rung.latency_ms
 
 
-def check_trace(host: str, timeout: float, max_hops: int = 15) -> Rung:
+def check_trace(host: str, timeout: float, max_hops: int = 12) -> Rung:
     rung = Rung(key="trace", title="Traceroute", core=False)
     system = platform.system().lower()
-    per_hop = max(1, min(2, int(round(timeout))))  # keep each hop snappy
+    per_hop = 1  # one second per hop, one probe per hop -> fast even when blocked
     if system == "windows":
         cmd = ["tracert", "-h", str(max_hops), "-w", str(per_hop * 1000), host]
     else:
         # -q 1: one probe per hop -> a blocked trace fails fast instead of hanging.
         cmd = ["traceroute", "-q", "1", "-m", str(max_hops), "-w", str(per_hop), host]
 
-    # Hard wall-clock cap so an unresponsive route never hangs the tool.
-    hard_cap = min(30, max_hops * per_hop + 5)
+    # Hard wall-clock cap so default-on traceroute never stalls a quick run.
+    hard_cap = min(9, max_hops * per_hop + 3)
     start = time.perf_counter()
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=hard_cap)
@@ -304,8 +318,21 @@ def check_trace(host: str, timeout: float, max_hops: int = 15) -> Rung:
 
     hops = _parse_hops(proc.stdout)
     rung.latency_ms = _elapsed_ms(start)
+
+    first_line = proc.stdout.split("\n", 1)[0]
+    dest_m = re.search(r"[\(\[]([0-9a-fA-F:.]+)[\)\]]", first_line)
+    dest_ip = dest_m.group(1) if dest_m else None
+    if dest_ip:
+        reached = any(h["responded"] and h["ip"] == dest_ip for h in hops)
+    else:
+        reached = bool(hops) and hops[-1]["responded"]
+    last_resp = max((h["hop"] for h in hops if h["responded"]), default=0)
+
     rung.data["hops"] = hops
-    reached = bool(hops) and hops[-1]["responded"]
+    rung.data["dest_ip"] = dest_ip
+    rung.data["reached"] = reached
     rung.status = Status.OK if hops else Status.WARN
-    rung.detail = f"{len(hops)} hop(s)" + ("" if reached else ", final hop silent")
+    rung.detail = f"{len(hops)} hops · " + (
+        "destination reached" if reached else f"silent after hop {last_resp}"
+    )
     return rung
