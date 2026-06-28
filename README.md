@@ -63,14 +63,39 @@ netdoctor runs the whole ladder for you, stops reasoning about ICMP the way a hu
 
 ## Install
 
+**pipx** (recommended — isolated, always on your PATH):
+
 ```bash
-git clone https://github.com/Sahilll15/netdoctor.git
-cd netdoctor
-python3 -m venv .venv && source .venv/bin/activate
-pip install -e .
+pipx install netdoctor
 ```
 
-Now `netdoctor` is on your PATH. (Prefer not to use the console script? `python -m netdoctor github.com` works the same way.)
+…or with the modern, faster installer: `uv tool install netdoctor` — or plain `pip install netdoctor`.
+
+**Homebrew** (macOS / Linux):
+
+```bash
+brew install Sahilll15/tap/netdoctor
+```
+
+**Docker** (no local Python at all):
+
+```bash
+docker run --rm ghcr.io/sahilll15/netdoctor github.com
+# ping & traceroute need raw sockets — grant them when you want those rungs:
+docker run --rm --cap-add=NET_RAW ghcr.io/sahilll15/netdoctor github.com
+```
+
+**Standalone binary** — grab the file for your OS from the [latest release](https://github.com/Sahilll15/netdoctor/releases), `chmod +x`, and run it. No Python required.
+
+**From source** (for hacking on it):
+
+```bash
+git clone https://github.com/Sahilll15/netdoctor.git
+cd netdoctor && python3 -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+> Pre-built packages (PyPI, Homebrew, Docker, binaries) ship automatically with each tagged release — see [RELEASING.md](RELEASING.md).
 
 ---
 

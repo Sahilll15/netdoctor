@@ -266,9 +266,14 @@ def _parse_hops(output: str) -> "list[dict]":
                 ip = ip_m.group(1)
             first = rest.split()[0]
             host = ip if first == "*" else first
-            rtt_m = re.search(r"([\d.]+)\s*ms", rest)
+            # Require a real number before "ms"; some routers emit stray dots
+            # or malformed timing fields that a looser pattern would capture.
+            rtt_m = re.search(r"(\d+(?:\.\d+)?)\s*ms", rest)
             if rtt_m:
-                rtt = float(rtt_m.group(1))
+                try:
+                    rtt = float(rtt_m.group(1))
+                except ValueError:
+                    rtt = None
         hops.append({
             "hop": int(match.group(1)),
             "host": host or "*",

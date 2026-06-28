@@ -1,0 +1,90 @@
+name: Release
+
+# Cut a release by pushing a tag:  git tag v0.1.0 && git push --tags
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  # 1) Publish to PyPI via Trusted Publishing (OIDC) — no tokens/secrets needed.
+  #    One-time: add this repo as a Trusted Publisher on pypi.org (see RELEASING.md).
+  pypi:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # 2) Build a standalone single-file binary for each OS and attach to the Release.
+  binaries:
+    name: Binary (${{ matrix.asset }})
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: netdoctor-linux-x86_64
+          - os: macos-latest
+            asset: netdoctor-macos-arm64
+          - os: macos-13
+            asset: netdoctor-macos-x86_64
+          - os: windows-latest
+            asset: netdoctor-windows-x86_64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyinstaller .
+      - name: Build binary
+        run: pyinstaller --onefile --name netdoctor --collect-submodules rich packaging/entry.py
+      - name: Stage asset
+        shell: bash
+        run: |
+          mkdir -p out
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp dist/netdoctor.exe "out/${{ matrix.asset }}"
+          else
+            cp dist/netdoctor "out/${{ matrix.asset }}"
+          fi
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/${{ matrix.asset }}
+
+  # 3) Build and push the container image to GitHub Container Registry.
+  docker:
+    name: Docker image (GHCR)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/sahilll15/netdoctor
+          tags: |
+            type=semver,pattern={{version}}
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

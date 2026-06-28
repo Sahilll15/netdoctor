@@ -14,13 +14,23 @@ keywords = ["devops", "networking", "cli", "diagnostics", "dns", "tcp", "http", 
 classifiers = [
     "Environment :: Console",
     "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
     "Topic :: System :: Networking :: Monitoring",
+    "Topic :: Utilities",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
 ]
 dependencies = ["rich>=13.0"]
 
+[project.urls]
+Homepage = "https://github.com/Sahilll15/netdoctor"
+Repository = "https://github.com/Sahilll15/netdoctor"
+Issues = "https://github.com/Sahilll15/netdoctor/issues"
+
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
+build = ["build", "pyinstaller>=6.0"]
 
 [project.scripts]
 netdoctor = "netdoctor.cli:main"

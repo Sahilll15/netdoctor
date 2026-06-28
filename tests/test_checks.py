@@ -61,3 +61,18 @@ def test_parse_hops_extracts_host_ip_rtt_and_silence():
 
     assert hops[2]["responded"] is True
     assert hops[2]["rtt_ms"] == 10.4
+
+
+def test_parse_hops_survives_malformed_rtt():
+    # Real routers occasionally emit a stray dot or a non-numeric timing field.
+    # A loose pattern would capture "." and crash on float(".") — the parser must
+    # treat the hop as responded-but-untimed rather than blow up the whole run.
+    output = (
+        "traceroute to example.com (93.184.216.34), 30 hops max\n"
+        " 1  weird.host (10.0.0.1)  . ms\n"
+        " 2  93.184.216.34 (93.184.216.34)  10.4 ms\n"
+    )
+    hops = _parse_hops(output)
+    assert hops[0]["responded"] is True
+    assert hops[0]["rtt_ms"] is None  # malformed timing → no number, not a crash
+    assert hops[1]["rtt_ms"] == 10.4
